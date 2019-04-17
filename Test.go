@@ -1,84 +1,106 @@
 package main
 
 import (
-	"github.com/ebbo/vulkTest/util"
+	"./util"
+	"log"
+	"runtime"
+	"time"
+
+	as "github.com/vulkan-go/asche"
 	"github.com/vulkan-go/glfw/v3.3/glfw"
 	vk "github.com/vulkan-go/vulkan"
 	"github.com/xlab/closer"
-	"log"
-	"time"
 )
 
-var (
-	deviceInfo   util.VulkanDeviceInfo
-	swapChainInfo   util.VulkanSwapchainInfo
-	renderInfo   util.VulkanRenderInfo
-	bufferInfo   util.VulkanBufferInfo
-	pipelineInfo util.VulkanGfxPipelineInfo
-)
-
- var appInfo = &vk.ApplicationInfo{
-	SType:              vk.StructureTypeApplicationInfo,
-	ApiVersion:         vk.MakeVersion(1, 0, 0),
-	ApplicationVersion: vk.MakeVersion(1, 0, 0),
-	PApplicationName:   "VulkanInfo\x00",
-	PEngineName:        "vulkango.com\x00",
+func init() {
+	runtime.LockOSThread()
+	log.SetFlags(log.Lshortfile)
 }
 
+type Application struct {
+	*util.SpinningCube
+	debugEnabled bool
+	windowHandle *glfw.Window
+}
 
- func recreateSwapChain() {
- 	vk.DeviceWaitIdle(deviceInfo.Device)
- 	swapChainInfo.Destroy()
-	deviceInfo.CreateSwapchain()
-	util.CreateRenderer(deviceInfo.Device, swapChainInfo.DisplayFormat)
-	swapChainInfo.CreateFramebuffers(renderInfo.RenderPass, nil)
-	deviceInfo.CreateBuffers()
-	util.CreateGraphicsPipeline(deviceInfo.Device, swapChainInfo.DisplaySize, renderInfo.RenderPass)
-	renderInfo.CreateCommandBuffers(swapChainInfo.DefaultSwapchainLen())
- }
-func main() {
-	procAddr := glfw.GetVulkanGetInstanceProcAddress()
-	if procAddr == nil {
-		panic("GetInstanceProcAddress is nil")
+func (a *Application) VulkanSurface(instance vk.Instance) (surface vk.Surface) {
+	surfPtr, err := a.windowHandle.CreateWindowSurface(instance, nil)
+	if err != nil {
+		log.Println(err)
+		return vk.NullSurface
 	}
-	vk.SetGetInstanceProcAddr(procAddr)
+	return vk.SurfaceFromPointer(surfPtr)
+}
 
+func (a *Application) VulkanAppName() string {
+	return "LOOOOL"
+}
+
+func (a *Application) VulkanLayers() []string {
+	return []string{
+		//"VK_LAYER_GOOGLE_threading",
+		// "VK_LAYER_LUNARG_parameter_validation",
+		// "VK_LAYER_LUNARG_object_tracker",
+		// "VK_LAYER_LUNARG_core_validation",
+		// "VK_LAYER_LUNARG_api_dump",
+		// "VK_LAYER_LUNARG_swapchain",
+		// "VK_LAYER_GOOGLE_unique_objects",
+	}
+}
+
+func (a *Application) VulkanDebug() bool {
+	return false // a.debugEnabled
+}
+
+func (a *Application) VulkanDeviceExtensions() []string {
+	return []string{
+		"VK_KHR_swapchain",
+	}
+}
+
+func (a *Application) VulkanSwapchainDimensions() *as.SwapchainDimensions {
+	return &as.SwapchainDimensions{
+		Width: 500, Height: 500, Format: vk.FormatB8g8r8a8Unorm,
+	}
+}
+
+func (a *Application) VulkanInstanceExtensions() []string {
+	extensions := a.windowHandle.GetRequiredInstanceExtensions()
+	if a.debugEnabled {
+		extensions = append(extensions, "VK_EXT_debug_report")
+	}
+	return extensions
+}
+
+func NewApplication(debugEnabled bool) *Application {
+	return &Application{
+		SpinningCube: util.NewSpinningCube(0),
+
+		debugEnabled: debugEnabled,
+	}
+}
+
+func main() {
 	orPanic(glfw.Init())
+	vk.SetGetInstanceProcAddr(glfw.GetVulkanGetInstanceProcAddress())
 	orPanic(vk.Init())
 	defer closer.Close()
 
+	app := NewApplication(true)
+	reqDim := app.VulkanSwapchainDimensions()
 	glfw.WindowHint(glfw.ClientAPI, glfw.NoAPI)
-	glfw.WindowHint(glfw.Resizable,glfw.True)
+	window, err := glfw.CreateWindow(int(reqDim.Width), int(reqDim.Height), "FieboLib Vulkan Test :D", nil, nil)
+	orPanic(err)
+	app.windowHandle = window
 
-	window, err := glfw.CreateWindow(500, 500, "Ebbo's Vulkan Test :D", nil, nil)
-	orPanic(err)
-
-	createSurface := func(instance interface{}) uintptr {
-		surface, err := window.CreateWindowSurface(instance, nil)
-		orPanic(err)
-		return surface
-	}
-
-	deviceInfo, err = util.NewVulkanDevice(appInfo,
-		window.GLFWWindow(),
-		window.GetRequiredInstanceExtensions(),
-		createSurface)
-
-	orPanic(err)
-	swapChainInfo, err = deviceInfo.CreateSwapchain()
-	orPanic(err)
-	renderInfo, err = util.CreateRenderer(deviceInfo.Device, swapChainInfo.DisplayFormat)
-	orPanic(err)
-	err = swapChainInfo.CreateFramebuffers(renderInfo.RenderPass, nil)
-	orPanic(err)
-	bufferInfo, err = deviceInfo.CreateBuffers()
-	orPanic(err)
-	pipelineInfo, err = util.CreateGraphicsPipeline(deviceInfo.Device, swapChainInfo.DisplaySize, renderInfo.RenderPass)
-	orPanic(err)
-	log.Println("[INFO] swapchain lengths:", swapChainInfo.SwapchainLen)
-	err = renderInfo.CreateCommandBuffers(swapChainInfo.DefaultSwapchainLen())
+	// creates a new platform, also initializes Vulkan context in the app
+	platform, err := as.NewPlatform(app)
 	orPanic(err)
 
+	dim := app.Context().SwapchainDimensions()
+	log.Printf("Initialized %s with %+v swapchain", app.VulkanAppName(), dim)
+
+	// some sync logic
 	doneC := make(chan struct{}, 2)
 	exitC := make(chan struct{}, 2)
 	defer closer.Bind(func() {
@@ -87,15 +109,13 @@ func main() {
 		log.Println("Bye!")
 	})
 
-
-	util.PrintInfo(&deviceInfo)
-	util.VulkanInit(&deviceInfo, &swapChainInfo, &renderInfo, &bufferInfo, &pipelineInfo)
-
-	fpsTicker := time.NewTicker(time.Second / 30)
+	fpsDelay := time.Second / 60
+	fpsTicker := time.NewTicker(fpsDelay)
 	for {
 		select {
 		case <-exitC:
-			util.DestroyInOrder(&deviceInfo, &swapChainInfo, &renderInfo, &bufferInfo, &pipelineInfo)
+			app.Destroy()
+			platform.Destroy()
 			window.Destroy()
 			glfw.Terminate()
 			fpsTicker.Stop()
@@ -107,7 +127,16 @@ func main() {
 				continue
 			}
 			glfw.PollEvents()
-			util.VulkanDrawFrame(deviceInfo,swapChainInfo,renderInfo)
+			app.NextFrame()
+
+			imageIdx, outdated, err := app.Context().AcquireNextImage()
+			orPanic(err)
+			if outdated {
+				imageIdx, _, err = app.Context().AcquireNextImage()
+				orPanic(err)
+			}
+			_, err = app.Context().PresentImage(imageIdx)
+			orPanic(err)
 		}
 	}
 }

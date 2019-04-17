@@ -1,72 +1,60 @@
 package util
+
 import (
 	"fmt"
-	"log"
-	"strings"
-	"unsafe"
+	"runtime"
 
 	vk "github.com/vulkan-go/vulkan"
 )
 
-func check(ret vk.Result, name string) bool {
-	if err := vk.Error(ret); err != nil {
-		log.Println("[WARN]", name, "failed with", err)
-		return true
-	}
-	return false
+type Unwind []func()
+
+func (u Unwind) Add(cleanup func()) {
+	u = append(u, cleanup)
 }
 
-func orPanic(err interface{}) {
-	switch v := err.(type) {
-	case error:
-		if v != nil {
-			panic(err)
-		}
-	case vk.Result:
-		if err := vk.Error(v); err != nil {
-			panic(err)
-		}
-	case bool:
-		if !v {
-			panic("condition failed: != true")
-		}
+func (u Unwind) Unwind() {
+	for i := len(u) - 1; i >= 0; i-- {
+		u[i]()
 	}
 }
 
-func orPanicWith(err interface{}, notes ...string) {
-	getNotes := func() string {
-		return strings.Join(notes, " ")
-	}
-	switch v := err.(type) {
-	case error:
-		if v != nil {
-			if len(notes) > 0 {
-				err = fmt.Errorf("%s: %s", err, getNotes())
-			}
-			panic(err)
-		}
-	case vk.Result:
-		if err := vk.Error(v); err != nil {
-			if len(notes) > 0 {
-				err = fmt.Errorf("%s: %s", err, getNotes())
-			}
-			panic(err)
-		}
-	case bool:
-		if !v {
-			if len(notes) > 0 {
-				err := fmt.Errorf("condition failed: %s", getNotes())
-				panic(err)
-			}
-			panic("condition failed: != true")
-		}
+func (u Unwind) Discard() {
+	if len(u) > 0 {
+		u = u[:0]
 	}
 }
 
-func repackUint32(data []byte) []uint32 {
-	buf := make([]uint32, len(data)/4)
-	vk.Memcopy(unsafe.Pointer((*sliceHeader)(unsafe.Pointer(&buf)).Data), data)
-	return buf
+func isError(ret vk.Result) bool {
+	return ret != vk.Success
+}
+
+func orPanic(err error, finalizers ...func()) {
+	if err != nil {
+		for _, fn := range finalizers {
+			fn()
+		}
+		panic(err)
+	}
+}
+
+func checkErr(err *error) {
+	if v := recover(); v != nil {
+		*err = fmt.Errorf("%+v", v)
+	}
+}
+
+func checkErrStack(err *error) {
+	if v := recover(); v != nil {
+		stack := make([]byte, 32*1024)
+		n := runtime.Stack(stack, false)
+		switch event := v.(type) {
+		case error:
+			*err = fmt.Errorf("%s\n%s", event.Error(), stack[:n])
+		default:
+			*err = fmt.Errorf("%+v %s", v, stack[:n])
+		}
+	}
 }
 
 type sliceHeader struct {
