@@ -125,7 +125,6 @@ func (s *SpinningCube) prepareDepth() {
 
 var texEnabled = []string{
 	"./util/textures/green.png",
-	"./util/textures/gopher.png",
 }
 
 func (s *SpinningCube) prepareTextureImage(path string, tiling vk.ImageTiling,
