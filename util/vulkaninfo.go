@@ -590,9 +590,11 @@ func (s *SpinningCube) prepareRenderPass() {
 func (s *SpinningCube) preparePipeline() {
 	dev := s.Context().Device()
 
-	vs, err := as.LoadShaderModule(dev, "./util/shader/vert.spv")
+	shader, _ := ioutil.ReadFile("./util/shader/vert.spv")
+	vs, err := as.LoadShaderModule(dev, shader)
 	orPanic(err)
-	fs, err := as.LoadShaderModule(dev, "./util/shader/frag.spv")
+	frag, _ := ioutil.ReadFile("./util/shader/frag.spv")
+	fs, err := as.LoadShaderModule(dev, frag)
 	orPanic(err)
 
 	var pipelineCache vk.PipelineCache
